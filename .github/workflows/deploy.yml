@@ -30,6 +30,13 @@ jobs:
       - name: Install
         run: npm ci
 
+      - name: Create production env
+        run: |
+          cat > .env.production <<'EOF'
+          VITE_STUDENT_API_BASE_URL=${{ vars.VITE_STUDENT_API_BASE_URL }}
+          VITE_STUDENT_API_KEY=${{ secrets.VITE_STUDENT_API_KEY }}
+          EOF
+
       - name: Build
         env:
           BASE_PATH: /${{ github.event.repository.name }}/
