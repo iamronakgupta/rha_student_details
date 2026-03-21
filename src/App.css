@@ -256,6 +256,11 @@
   flex: 1;
   min-width: 0;
 }
+.labelMuted {
+  font-weight: 400;
+  color: var(--text-muted, #888);
+  font-size: 0.9em;
+}
 .profileImageRow {
   display: flex;
   flex-wrap: wrap;

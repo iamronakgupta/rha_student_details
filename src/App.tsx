@@ -20,8 +20,8 @@ const EMPTY_CREATE: StudentCreateInput = {
   profile_image_url: '',
 }
 
-/** Set to false to re-enable URL editing and photo upload. */
-const PROFILE_IMAGE_FIELD_DISABLED = true
+/** When true, the profile URL field cannot be edited by hand; use Upload photo (sheet still updates from upload). */
+const PROFILE_IMAGE_URL_DIRECT_EDIT_DISABLED = true
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : value == null ? '' : String(value)
@@ -490,9 +490,12 @@ function App() {
                     imageUrl={draft.profile_image_url}
                   />
                 </div>
-                <div className={`profileImageField${PROFILE_IMAGE_FIELD_DISABLED ? ' profileImageFieldDisabled' : ''}`}>
+                <div className="profileImageField">
                   <label className="label" htmlFor="profile_image_url">
                     Profile image (Google Drive or URL)
+                    {PROFILE_IMAGE_URL_DIRECT_EDIT_DISABLED ? (
+                      <span className="labelMuted"> — set via upload</span>
+                    ) : null}
                   </label>
                   <div className="profileImageRow">
                     <input
@@ -500,14 +503,19 @@ function App() {
                       className="input"
                       type="url"
                       placeholder={
-                        PROFILE_IMAGE_FIELD_DISABLED ? 'Not editable' : 'Paste URL or upload below'
+                        PROFILE_IMAGE_URL_DIRECT_EDIT_DISABLED && (mode === 'edit' || mode === 'create')
+                          ? 'Set via upload'
+                          : 'Paste URL or upload below'
                       }
                       value={draft.profile_image_url ?? ''}
                       onChange={(e) => setDraft((d) => ({ ...d, profile_image_url: e.target.value }))}
-                      readOnly={!PROFILE_IMAGE_FIELD_DISABLED && mode === 'view'}
-                      disabled={PROFILE_IMAGE_FIELD_DISABLED}
+                      readOnly={mode === 'view'}
+                      disabled={
+                        PROFILE_IMAGE_URL_DIRECT_EDIT_DISABLED &&
+                        (mode === 'edit' || mode === 'create')
+                      }
                     />
-                    {(mode === 'edit' || mode === 'create') && !PROFILE_IMAGE_FIELD_DISABLED && (
+                    {(mode === 'edit' || mode === 'create') && (
                       <>
                         <input
                           ref={fileInputRef}
