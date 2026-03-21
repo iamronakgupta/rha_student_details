@@ -1,7 +1,8 @@
 import './App.css'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createStudent, listStudentsByName, updateStudent, uploadProfileImage } from './api/studentApi'
 import type { Student, StudentCreateInput, StudentUpdateInput } from './types/student'
+import { driveImageSrcCandidates } from './utils/driveImage'
 
 type Mode = 'view' | 'edit' | 'create'
 type MobilePane = 'list' | 'details'
@@ -18,6 +19,9 @@ const EMPTY_CREATE: StudentCreateInput = {
   comment: '',
   profile_image_url: '',
 }
+
+/** Set to false to re-enable URL editing and photo upload. */
+const PROFILE_IMAGE_FIELD_DISABLED = true
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : value == null ? '' : String(value)
@@ -52,28 +56,6 @@ function getInitials(name: string): string {
   return n.slice(0, 2).toUpperCase()
 }
 
-function normalizeProfileImageUrl(url: string): string {
-  const u = url.trim()
-  if (!u) return ''
-
-  // If someone pastes a normal Drive file URL like:
-  // https://drive.google.com/file/d/<FILE_ID>/view?usp=sharing
-  // convert it to a direct image link that works in <img src="...">
-  const fileMatch = u.match(/drive\.google\.com\/file\/d\/([^/]+)/)
-  if (fileMatch?.[1]) {
-    const id = fileMatch[1]
-    return `https://drive.google.com/thumbnail?id=${id}`
-  }
-
-  const openMatch = u.match(/drive\.google\.com\/open\?id=([^&]+)/)
-  if (openMatch?.[1]) {
-    const id = openMatch[1]
-    return `https://drive.google.com/thumbnail?id=${id}`
-  }
-
-  return u
-}
-
 function Avatar({
   name,
   imageUrl,
@@ -81,20 +63,58 @@ function Avatar({
   name: string
   imageUrl?: string
 }) {
+  const [attempt, setAttempt] = useState(0)
   const [failed, setFailed] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const imgRef = useRef<HTMLImageElement>(null)
+
+  const candidates = useMemo(() => driveImageSrcCandidates(imageUrl ?? ''), [imageUrl])
+
+  // Reset synchronously when URL changes — useEffect runs too late: one frame could use a new
+  // candidates[] with a stale `attempt` index (wrong src / every-other-row glitches in lists).
+  const [prevImageUrl, setPrevImageUrl] = useState(imageUrl)
+  if (imageUrl !== prevImageUrl) {
+    setPrevImageUrl(imageUrl)
+    setAttempt(0)
+    setFailed(false)
+    setLoaded(false)
+  }
 
   const initials = getInitials(name)
-  const hasImage = !!imageUrl && !!imageUrl.trim()
+  const hasImage = candidates.length > 0
+  const src = candidates[attempt] ?? ''
+
+  /** Cached images often load before `onLoad` attaches — hide initials when already decoded. */
+  useLayoutEffect(() => {
+    const el = imgRef.current
+    if (!el) return
+    if (el.complete && el.naturalWidth > 0) {
+      setLoaded(true)
+    }
+  }, [src, attempt])
+
   if (!hasImage || failed) {
     return <span className="avatarInitials">{initials}</span>
   }
 
-  const src = normalizeProfileImageUrl(imageUrl)
-  console.log('src', src)
   return (
     <>
-      <img src={src} alt="" onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
+      <img
+        ref={imgRef}
+        key={`${src}-${attempt}`}
+        src={src}
+        alt=""
+        referrerPolicy="no-referrer"
+        onLoad={() => setLoaded(true)}
+        onError={() => {
+          if (attempt + 1 < candidates.length) {
+            setLoaded(false)
+            setAttempt((a) => a + 1)
+          } else {
+            setFailed(true)
+          }
+        }}
+      />
       {!loaded ? <span className="avatarInitials">{initials}</span> : null}
     </>
   )
@@ -111,9 +131,7 @@ function diffUpdate(original: Student, edited: StudentCreateInput): StudentUpdat
   if (edited.shoe_size !== original.shoe_size) patch.shoe_size = edited.shoe_size
   if (edited.tee_size !== original.tee_size) patch.tee_size = edited.tee_size
   if (edited.comment !== original.comment) patch.comment = edited.comment
-  const editedImg = (edited as { profile_image_url?: string }).profile_image_url
-  const origImg = (original as { profile_image_url?: string }).profile_image_url
-  if (editedImg !== origImg) (patch as { profile_image_url?: string }).profile_image_url = editedImg ?? ''
+  // profile_image_url is written by the upload_image API on the sheet — do not send on update
   return patch
 }
 
@@ -173,6 +191,17 @@ function App() {
   function clearMessages() {
     setError(null)
     setNotice(null)
+  }
+
+  /** Reload rows from API without toggling list loading UI (e.g. after photo upload). */
+  async function refreshStudentRowsOnly() {
+    setError(null)
+    try {
+      const list = await listStudentsByName(query.trim())
+      setStudents(list.map(normalizeStudent))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load students')
+    }
   }
 
   async function refreshList(nextSelectedId?: number) {
@@ -257,9 +286,17 @@ function App() {
     clearMessages()
     setUploadingImage(true)
     try {
-      const url = await uploadProfileImage(file)
-      setDraft((d) => ({ ...d, profile_image_url: url }))
-      setNotice('Photo uploaded. Click Save to keep it.')
+      const url = await uploadProfileImage(file, {
+        studentId: selected?.id,
+      })
+      // Sheet URL is updated by the script for existing students; reload rows so UI matches sheet
+      if (selectedId != null) {
+        await refreshStudentRowsOnly()
+        setNotice('Photo uploaded.')
+      } else {
+        setDraft((d) => ({ ...d, profile_image_url: url }))
+        setNotice('Photo uploaded. Save the new student when ready.')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
@@ -360,7 +397,11 @@ function App() {
               >
                 <div className="listItemInner">
                   <div className="avatar avatarSm">
-                    <Avatar name={s.name} imageUrl={s.profile_image_url} />
+                    <Avatar
+                      key={`${s.id}-${s.profile_image_url ?? ''}`}
+                      name={s.name}
+                      imageUrl={s.profile_image_url}
+                    />
                   </div>
                   <div className="listItemText">
                     <div className="listTitle">{s.name || '(no name)'}</div>
@@ -443,9 +484,13 @@ function App() {
             >
               <div className="profileSection">
                 <div className="avatar avatarLg">
-                  <Avatar name={draft.name} imageUrl={draft.profile_image_url} />
+                  <Avatar
+                    key={`${selectedId ?? 'new'}-${draft.profile_image_url ?? ''}`}
+                    name={draft.name}
+                    imageUrl={draft.profile_image_url}
+                  />
                 </div>
-                <div className="profileImageField">
+                <div className={`profileImageField${PROFILE_IMAGE_FIELD_DISABLED ? ' profileImageFieldDisabled' : ''}`}>
                   <label className="label" htmlFor="profile_image_url">
                     Profile image (Google Drive or URL)
                   </label>
@@ -454,12 +499,15 @@ function App() {
                       id="profile_image_url"
                       className="input"
                       type="url"
-                      placeholder="Paste URL or upload below"
+                      placeholder={
+                        PROFILE_IMAGE_FIELD_DISABLED ? 'Not editable' : 'Paste URL or upload below'
+                      }
                       value={draft.profile_image_url ?? ''}
                       onChange={(e) => setDraft((d) => ({ ...d, profile_image_url: e.target.value }))}
-                      readOnly={mode === 'view'}
+                      readOnly={!PROFILE_IMAGE_FIELD_DISABLED && mode === 'view'}
+                      disabled={PROFILE_IMAGE_FIELD_DISABLED}
                     />
-                    {(mode === 'edit' || mode === 'create') && (
+                    {(mode === 'edit' || mode === 'create') && !PROFILE_IMAGE_FIELD_DISABLED && (
                       <>
                         <input
                           ref={fileInputRef}

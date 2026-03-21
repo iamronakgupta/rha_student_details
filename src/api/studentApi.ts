@@ -88,11 +88,19 @@ const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as con
 
 type UploadResponse = { success: true; url: string } | { success: false; error?: string }
 
+export type UploadProfileImageOptions = {
+  /** Student id (string in JSON for Apps Script). Omit when creating a new student before save. */
+  studentId?: number
+}
+
 /**
  * Upload a profile image via Apps Script; script creates a file in Google Drive
  * and returns a direct image URL. Requires your script to handle action=upload_image.
  */
-export async function uploadProfileImage(file: File): Promise<string> {
+export async function uploadProfileImage(
+  file: File,
+  options?: UploadProfileImageOptions,
+): Promise<string> {
   if (!IMAGE_MIME.includes(file.type as (typeof IMAGE_MIME)[number])) {
     throw new Error('Please choose a JPEG, PNG, GIF, or WebP image.')
   }
@@ -101,14 +109,18 @@ export async function uploadProfileImage(file: File): Promise<string> {
   }
   const base64 = await fileToBase64(file)
   const url = buildUrl('upload_image')
+  const payload: Record<string, string> = {
+    base64,
+    name: file.name || 'profile.jpg',
+    mimeType: file.type || 'image/jpeg',
+  }
+  if (options?.studentId != null) {
+    payload.id = String(options.studentId)
+  }
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({
-      base64,
-      name: file.name || 'profile.jpg',
-      mimeType: file.type || 'image/jpeg',
-    }),
+    body: JSON.stringify(payload),
   })
   if (!res.ok) throw new Error(`Upload failed (HTTP ${res.status})`)
   const data = await parseJson<UploadResponse>(res)
