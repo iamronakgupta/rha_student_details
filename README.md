@@ -30,4 +30,7 @@ In your GitHub repo:
 
 - **Settings → Pages → Build and deployment**: select **GitHub Actions**
 - Push to `main` and the site will deploy to `https://<user>.github.io/<repo>/`
-# rha_student_details
+
+## Profile photos (Google Drive)
+
+You can upload profile images to **Google Drive** from the app. Your Apps Script must handle `action=upload_image`. See **[docs/GOOGLE_DRIVE_UPLOAD.md](docs/GOOGLE_DRIVE_UPLOAD.md)** for the script code and setup.

@@ -178,8 +178,6 @@
   border-radius: 12px;
   padding: 10px 10px;
   cursor: pointer;
-  display: grid;
-  gap: 6px;
 }
 .listItem:hover {
   background: color-mix(in oklab, var(--accent-bg), transparent 30%);
@@ -188,6 +186,92 @@
 .listItem.isActive {
   background: color-mix(in oklab, var(--accent-bg), transparent 10%);
   border-color: var(--accent-border);
+}
+
+.listItemInner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.listItemText {
+  min-width: 0;
+}
+
+.avatar {
+  flex-shrink: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--accent-bg), transparent 20%);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.avatarInitials {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  box-sizing: border-box;
+}
+.avatarSm {
+  width: 40px;
+  height: 40px;
+}
+.avatarSm .avatarInitials {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-h);
+  opacity: 0.9;
+}
+.avatarLg {
+  width: 96px;
+  height: 96px;
+}
+.avatarLg .avatarInitials {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-h);
+  opacity: 0.9;
+}
+
+.profileSection {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.profileImageField {
+  flex: 1;
+  min-width: 0;
+}
+.profileImageRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.profileImageRow .input {
+  flex: 1;
+  min-width: 120px;
+}
+.hiddenFileInput {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .listTitle {
@@ -379,6 +463,28 @@
 
   .backBtn {
     display: inline-flex;
+  }
+
+  .profileSection {
+    flex-direction: column;
+    align-items: center;
+  }
+  .profileImageField {
+    width: 100%;
+  }
+  .profileImageRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .profileImageRow .input {
+    min-width: 0;
+  }
+  .avatarLg {
+    width: 80px;
+    height: 80px;
+  }
+  .avatarLg .avatarInitials {
+    font-size: 22px;
   }
 }
 

@@ -1,6 +1,6 @@
 import './App.css'
-import { useEffect, useMemo, useState } from 'react'
-import { createStudent, listStudentsByName, updateStudent } from './api/studentApi'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createStudent, listStudentsByName, updateStudent, uploadProfileImage } from './api/studentApi'
 import type { Student, StudentCreateInput, StudentUpdateInput } from './types/student'
 
 type Mode = 'view' | 'edit' | 'create'
@@ -16,6 +16,7 @@ const EMPTY_CREATE: StudentCreateInput = {
   shoe_size: '',
   tee_size: '',
   comment: '',
+  profile_image_url: '',
 }
 
 function asString(value: unknown): string {
@@ -39,7 +40,64 @@ function normalizeStudent(raw: Student): Student {
     shoe_size: asString(raw.shoe_size),
     tee_size: asString(raw.tee_size),
     comment: asString(raw.comment),
+    profile_image_url: asString((raw as { profile_image_url?: string }).profile_image_url),
   }
+}
+
+function getInitials(name: string): string {
+  const n = name.trim()
+  if (!n) return '?'
+  const parts = n.split(/\s+/)
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  return n.slice(0, 2).toUpperCase()
+}
+
+function normalizeProfileImageUrl(url: string): string {
+  const u = url.trim()
+  if (!u) return ''
+
+  // If someone pastes a normal Drive file URL like:
+  // https://drive.google.com/file/d/<FILE_ID>/view?usp=sharing
+  // convert it to a direct image link that works in <img src="...">
+  const fileMatch = u.match(/drive\.google\.com\/file\/d\/([^/]+)/)
+  if (fileMatch?.[1]) {
+    const id = fileMatch[1]
+    return `https://drive.google.com/thumbnail?id=${id}`
+  }
+
+  const openMatch = u.match(/drive\.google\.com\/open\?id=([^&]+)/)
+  if (openMatch?.[1]) {
+    const id = openMatch[1]
+    return `https://drive.google.com/thumbnail?id=${id}`
+  }
+
+  return u
+}
+
+function Avatar({
+  name,
+  imageUrl,
+}: {
+  name: string
+  imageUrl?: string
+}) {
+  const [failed, setFailed] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+
+  const initials = getInitials(name)
+  const hasImage = !!imageUrl && !!imageUrl.trim()
+  if (!hasImage || failed) {
+    return <span className="avatarInitials">{initials}</span>
+  }
+
+  const src = normalizeProfileImageUrl(imageUrl)
+  console.log('src', src)
+  return (
+    <>
+      <img src={src} alt="" onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
+      {!loaded ? <span className="avatarInitials">{initials}</span> : null}
+    </>
+  )
 }
 
 function diffUpdate(original: Student, edited: StudentCreateInput): StudentUpdateInput {
@@ -53,6 +111,9 @@ function diffUpdate(original: Student, edited: StudentCreateInput): StudentUpdat
   if (edited.shoe_size !== original.shoe_size) patch.shoe_size = edited.shoe_size
   if (edited.tee_size !== original.tee_size) patch.tee_size = edited.tee_size
   if (edited.comment !== original.comment) patch.comment = edited.comment
+  const editedImg = (edited as { profile_image_url?: string }).profile_image_url
+  const origImg = (original as { profile_image_url?: string }).profile_image_url
+  if (editedImg !== origImg) (patch as { profile_image_url?: string }).profile_image_url = editedImg ?? ''
   return patch
 }
 
@@ -67,8 +128,10 @@ function App() {
 
   const [loadingList, setLoadingList] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const selected = useMemo(
     () => (selectedId == null ? null : students.find((s) => s.id === selectedId) ?? null),
@@ -188,6 +251,23 @@ function App() {
     setMode('view')
   }
 
+  async function onProfileImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    clearMessages()
+    setUploadingImage(true)
+    try {
+      const url = await uploadProfileImage(file)
+      setDraft((d) => ({ ...d, profile_image_url: url }))
+      setNotice('Photo uploaded. Click Save to keep it.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploadingImage(false)
+      e.target.value = ''
+    }
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -278,12 +358,19 @@ function App() {
                   setMobilePane('details')
                 }}
               >
-                <div className="listTitle">{s.name || '(no name)'}</div>
-                <div className="listSub">
+                <div className="listItemInner">
+                  <div className="avatar avatarSm">
+                    <Avatar name={s.name} imageUrl={s.profile_image_url} />
+                  </div>
+                  <div className="listItemText">
+                    <div className="listTitle">{s.name || '(no name)'}</div>
+                    <div className="listSub">
                   <span className="pill">#{s.id}</span>
                   <span className="muted">{s.academy_class || '—'}</span>
                   <span className="dot" aria-hidden="true" />
                   <span className="muted">{s.school || '—'}</span>
+                </div>
+                  </div>
                 </div>
               </button>
             ))}
@@ -354,6 +441,49 @@ function App() {
                 if (mode === 'edit' || mode === 'create') void onSave()
               }}
             >
+              <div className="profileSection">
+                <div className="avatar avatarLg">
+                  <Avatar name={draft.name} imageUrl={draft.profile_image_url} />
+                </div>
+                <div className="profileImageField">
+                  <label className="label" htmlFor="profile_image_url">
+                    Profile image (Google Drive or URL)
+                  </label>
+                  <div className="profileImageRow">
+                    <input
+                      id="profile_image_url"
+                      className="input"
+                      type="url"
+                      placeholder="Paste URL or upload below"
+                      value={draft.profile_image_url ?? ''}
+                      onChange={(e) => setDraft((d) => ({ ...d, profile_image_url: e.target.value }))}
+                      readOnly={mode === 'view'}
+                    />
+                    {(mode === 'edit' || mode === 'create') && (
+                      <>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/jpeg,image/png,image/gif,image/webp"
+                          aria-label="Upload photo"
+                          className="hiddenFileInput"
+                          onChange={onProfileImageSelect}
+                          disabled={uploadingImage}
+                        />
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={uploadingImage}
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          {uploadingImage ? 'Uploading…' : 'Upload photo'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="grid">
                 <div className="field">
                   <label className="label" htmlFor="name">

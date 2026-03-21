@@ -9,6 +9,8 @@ export type Student = {
   shoe_size: string
   tee_size: string
   comment: string
+  /** Optional profile image URL (e.g. Google Drive link or any image URL). */
+  profile_image_url?: string
 }
 
 export type StudentCreateInput = Omit<Student, 'id'>
