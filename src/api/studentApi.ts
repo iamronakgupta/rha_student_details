@@ -81,3 +81,65 @@ export async function updateStudent(
   throw new Error('Update failed')
 }
 
+/** Max size for profile image upload (5MB) */
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const
+
+type UploadResponse = { success: true; url: string } | { success: false; error?: string }
+
+export type UploadProfileImageOptions = {
+  /** Student id (string in JSON for Apps Script). Omit when creating a new student before save. */
+  studentId?: number
+}
+
+/**
+ * Upload a profile image via Apps Script; script creates a file in Google Drive
+ * and returns a direct image URL. Requires your script to handle action=upload_image.
+ */
+export async function uploadProfileImage(
+  file: File,
+  options?: UploadProfileImageOptions,
+): Promise<string> {
+  if (!IMAGE_MIME.includes(file.type as (typeof IMAGE_MIME)[number])) {
+    throw new Error('Please choose a JPEG, PNG, GIF, or WebP image.')
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    throw new Error('Image must be under 5MB.')
+  }
+  const base64 = await fileToBase64(file)
+  const url = buildUrl('upload_image')
+  const payload: Record<string, string> = {
+    base64,
+    name: file.name || 'profile.jpg',
+    mimeType: file.type || 'image/jpeg',
+  }
+  if (options?.studentId != null) {
+    payload.id = String(options.studentId)
+  }
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error(`Upload failed (HTTP ${res.status})`)
+  const data = await parseJson<UploadResponse>(res)
+  if (data && (data as { success: boolean }).success === true) {
+    return (data as { url: string }).url
+  }
+  throw new Error((data as { error?: string })?.error || 'Upload failed')
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      const base64 = result.includes(',') ? result.split(',')[1] : result
+      resolve(base64 ?? '')
+    }
+    reader.onerror = () => reject(new Error('Failed to read file'))
+    reader.readAsDataURL(file)
+  })
+}
+

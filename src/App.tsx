@@ -1,7 +1,8 @@
 import './App.css'
-import { useEffect, useMemo, useState } from 'react'
-import { createStudent, listStudentsByName, updateStudent } from './api/studentApi'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createStudent, listStudentsByName, updateStudent, uploadProfileImage } from './api/studentApi'
 import type { Student, StudentCreateInput, StudentUpdateInput } from './types/student'
+import { driveImageSrcCandidates } from './utils/driveImage'
 
 type Mode = 'view' | 'edit' | 'create'
 type MobilePane = 'list' | 'details'
@@ -16,7 +17,11 @@ const EMPTY_CREATE: StudentCreateInput = {
   shoe_size: '',
   tee_size: '',
   comment: '',
+  profile_image_url: '',
 }
+
+/** Set to false to re-enable URL editing and photo upload. */
+const PROFILE_IMAGE_FIELD_DISABLED = true
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : value == null ? '' : String(value)
@@ -39,7 +44,80 @@ function normalizeStudent(raw: Student): Student {
     shoe_size: asString(raw.shoe_size),
     tee_size: asString(raw.tee_size),
     comment: asString(raw.comment),
+    profile_image_url: asString((raw as { profile_image_url?: string }).profile_image_url),
   }
+}
+
+function getInitials(name: string): string {
+  const n = name.trim()
+  if (!n) return '?'
+  const parts = n.split(/\s+/)
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  return n.slice(0, 2).toUpperCase()
+}
+
+function Avatar({
+  name,
+  imageUrl,
+}: {
+  name: string
+  imageUrl?: string
+}) {
+  const [attempt, setAttempt] = useState(0)
+  const [failed, setFailed] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const imgRef = useRef<HTMLImageElement>(null)
+
+  const candidates = useMemo(() => driveImageSrcCandidates(imageUrl ?? ''), [imageUrl])
+
+  // Reset synchronously when URL changes — useEffect runs too late: one frame could use a new
+  // candidates[] with a stale `attempt` index (wrong src / every-other-row glitches in lists).
+  const [prevImageUrl, setPrevImageUrl] = useState(imageUrl)
+  if (imageUrl !== prevImageUrl) {
+    setPrevImageUrl(imageUrl)
+    setAttempt(0)
+    setFailed(false)
+    setLoaded(false)
+  }
+
+  const initials = getInitials(name)
+  const hasImage = candidates.length > 0
+  const src = candidates[attempt] ?? ''
+
+  /** Cached images often load before `onLoad` attaches — hide initials when already decoded. */
+  useLayoutEffect(() => {
+    const el = imgRef.current
+    if (!el) return
+    if (el.complete && el.naturalWidth > 0) {
+      setLoaded(true)
+    }
+  }, [src, attempt])
+
+  if (!hasImage || failed) {
+    return <span className="avatarInitials">{initials}</span>
+  }
+
+  return (
+    <>
+      <img
+        ref={imgRef}
+        key={`${src}-${attempt}`}
+        src={src}
+        alt=""
+        referrerPolicy="no-referrer"
+        onLoad={() => setLoaded(true)}
+        onError={() => {
+          if (attempt + 1 < candidates.length) {
+            setLoaded(false)
+            setAttempt((a) => a + 1)
+          } else {
+            setFailed(true)
+          }
+        }}
+      />
+      {!loaded ? <span className="avatarInitials">{initials}</span> : null}
+    </>
+  )
 }
 
 function diffUpdate(original: Student, edited: StudentCreateInput): StudentUpdateInput {
@@ -53,6 +131,7 @@ function diffUpdate(original: Student, edited: StudentCreateInput): StudentUpdat
   if (edited.shoe_size !== original.shoe_size) patch.shoe_size = edited.shoe_size
   if (edited.tee_size !== original.tee_size) patch.tee_size = edited.tee_size
   if (edited.comment !== original.comment) patch.comment = edited.comment
+  // profile_image_url is written by the upload_image API on the sheet — do not send on update
   return patch
 }
 
@@ -67,8 +146,10 @@ function App() {
 
   const [loadingList, setLoadingList] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const selected = useMemo(
     () => (selectedId == null ? null : students.find((s) => s.id === selectedId) ?? null),
@@ -110,6 +191,17 @@ function App() {
   function clearMessages() {
     setError(null)
     setNotice(null)
+  }
+
+  /** Reload rows from API without toggling list loading UI (e.g. after photo upload). */
+  async function refreshStudentRowsOnly() {
+    setError(null)
+    try {
+      const list = await listStudentsByName(query.trim())
+      setStudents(list.map(normalizeStudent))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load students')
+    }
   }
 
   async function refreshList(nextSelectedId?: number) {
@@ -186,6 +278,31 @@ function App() {
   function onCancelEdit() {
     clearMessages()
     setMode('view')
+  }
+
+  async function onProfileImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    clearMessages()
+    setUploadingImage(true)
+    try {
+      const url = await uploadProfileImage(file, {
+        studentId: selected?.id,
+      })
+      // Sheet URL is updated by the script for existing students; reload rows so UI matches sheet
+      if (selectedId != null) {
+        await refreshStudentRowsOnly()
+        setNotice('Photo uploaded.')
+      } else {
+        setDraft((d) => ({ ...d, profile_image_url: url }))
+        setNotice('Photo uploaded. Save the new student when ready.')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploadingImage(false)
+      e.target.value = ''
+    }
   }
 
   return (
@@ -278,12 +395,23 @@ function App() {
                   setMobilePane('details')
                 }}
               >
-                <div className="listTitle">{s.name || '(no name)'}</div>
-                <div className="listSub">
+                <div className="listItemInner">
+                  <div className="avatar avatarSm">
+                    <Avatar
+                      key={`${s.id}-${s.profile_image_url ?? ''}`}
+                      name={s.name}
+                      imageUrl={s.profile_image_url}
+                    />
+                  </div>
+                  <div className="listItemText">
+                    <div className="listTitle">{s.name || '(no name)'}</div>
+                    <div className="listSub">
                   <span className="pill">#{s.id}</span>
                   <span className="muted">{s.academy_class || '—'}</span>
                   <span className="dot" aria-hidden="true" />
                   <span className="muted">{s.school || '—'}</span>
+                </div>
+                  </div>
                 </div>
               </button>
             ))}
@@ -354,6 +482,56 @@ function App() {
                 if (mode === 'edit' || mode === 'create') void onSave()
               }}
             >
+              <div className="profileSection">
+                <div className="avatar avatarLg">
+                  <Avatar
+                    key={`${selectedId ?? 'new'}-${draft.profile_image_url ?? ''}`}
+                    name={draft.name}
+                    imageUrl={draft.profile_image_url}
+                  />
+                </div>
+                <div className={`profileImageField${PROFILE_IMAGE_FIELD_DISABLED ? ' profileImageFieldDisabled' : ''}`}>
+                  <label className="label" htmlFor="profile_image_url">
+                    Profile image (Google Drive or URL)
+                  </label>
+                  <div className="profileImageRow">
+                    <input
+                      id="profile_image_url"
+                      className="input"
+                      type="url"
+                      placeholder={
+                        PROFILE_IMAGE_FIELD_DISABLED ? 'Not editable' : 'Paste URL or upload below'
+                      }
+                      value={draft.profile_image_url ?? ''}
+                      onChange={(e) => setDraft((d) => ({ ...d, profile_image_url: e.target.value }))}
+                      readOnly={!PROFILE_IMAGE_FIELD_DISABLED && mode === 'view'}
+                      disabled={PROFILE_IMAGE_FIELD_DISABLED}
+                    />
+                    {(mode === 'edit' || mode === 'create') && !PROFILE_IMAGE_FIELD_DISABLED && (
+                      <>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/jpeg,image/png,image/gif,image/webp"
+                          aria-label="Upload photo"
+                          className="hiddenFileInput"
+                          onChange={onProfileImageSelect}
+                          disabled={uploadingImage}
+                        />
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={uploadingImage}
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          {uploadingImage ? 'Uploading…' : 'Upload photo'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="grid">
                 <div className="field">
                   <label className="label" htmlFor="name">
