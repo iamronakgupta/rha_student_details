@@ -151,6 +151,48 @@
   gap: 10px;
   align-items: center;
 }
+.classFilter {
+  border: 0;
+  margin: 12px 0 0;
+  padding: 0;
+  min-width: 0;
+}
+.classFilter .label {
+  margin-bottom: 8px;
+}
+.radioGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.radioOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 7px 10px;
+  background: color-mix(in oklab, var(--bg), var(--code-bg) 22%);
+  color: var(--text-h);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.radioOption input {
+  accent-color: var(--accent);
+  margin: 0;
+  flex-shrink: 0;
+}
+.radioOption span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.radioOption:has(input:checked) {
+  border-color: var(--accent-border);
+  background: color-mix(in oklab, var(--accent-bg), transparent 8%);
+}
 
 .metaRow {
   display: flex;

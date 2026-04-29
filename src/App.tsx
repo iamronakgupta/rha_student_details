@@ -139,6 +139,7 @@ function App() {
   const [query, setQuery] = useState('')
   const [students, setStudents] = useState<Student[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [academyClassFilter, setAcademyClassFilter] = useState('')
 
   const [mode, setMode] = useState<Mode>('view')
   const [draft, setDraft] = useState<StudentCreateInput>(EMPTY_CREATE)
@@ -155,6 +156,21 @@ function App() {
     () => (selectedId == null ? null : students.find((s) => s.id === selectedId) ?? null),
     [students, selectedId],
   )
+
+  const academyClassOptions = useMemo(() => {
+    const classes = new Set<string>()
+    if (academyClassFilter) classes.add(academyClassFilter)
+    for (const student of students) {
+      const value = student.academy_class.trim()
+      if (value) classes.add(value)
+    }
+    return Array.from(classes).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  }, [academyClassFilter, students])
+
+  const displayedStudents = useMemo(() => {
+    if (!academyClassFilter) return students
+    return students.filter((student) => student.academy_class.trim() === academyClassFilter)
+  }, [academyClassFilter, students])
 
   useEffect(() => {
     // initial list: empty name gives all results in most scripts; if not, user can search
@@ -182,6 +198,12 @@ function App() {
       setDraft(rest)
     }
   }, [mode, selected])
+
+  useEffect(() => {
+    if (mode === 'create') return
+    if (selectedId != null && displayedStudents.some((student) => student.id === selectedId)) return
+    setSelectedId(displayedStudents[0]?.id ?? null)
+  }, [displayedStudents, mode, selectedId])
 
   useEffect(() => {
     // On mobile, if user selects or creates, jump to details pane.
@@ -371,11 +393,39 @@ function App() {
                 {loadingList ? 'Searching…' : 'Search'}
               </button>
             </div>
+
+            <fieldset className="classFilter">
+              <legend className="label">Academy class</legend>
+              <div className="radioGroup">
+                <label className="radioOption">
+                  <input
+                    type="radio"
+                    name="academyClassFilter"
+                    value=""
+                    checked={academyClassFilter === ''}
+                    onChange={() => setAcademyClassFilter('')}
+                  />
+                  <span>All</span>
+                </label>
+                {academyClassOptions.map((academyClass) => (
+                  <label className="radioOption" key={academyClass}>
+                    <input
+                      type="radio"
+                      name="academyClassFilter"
+                      value={academyClass}
+                      checked={academyClassFilter === academyClass}
+                      onChange={() => setAcademyClassFilter(academyClass)}
+                    />
+                    <span>{academyClass}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
           </form>
 
           <div className="metaRow">
             <div className="meta">
-              {loadingList ? 'Loading…' : `${students.length} student${students.length === 1 ? '' : 's'}`}
+              {loadingList ? 'Loading...' : `${displayedStudents.length} student${displayedStudents.length === 1 ? '' : 's'}`}
             </div>
             <button className="btn btnGhost" type="button" onClick={() => void refreshList()}>
               Refresh
@@ -383,7 +433,7 @@ function App() {
           </div>
 
           <div className="list" role="list">
-            {students.map((s) => (
+            {displayedStudents.map((s) => (
               <button
                 key={s.id}
                 type="button"
@@ -415,7 +465,7 @@ function App() {
                 </div>
               </button>
             ))}
-            {!loadingList && students.length === 0 ? (
+            {!loadingList && displayedStudents.length === 0 ? (
               <div className="empty">
                 No results. Try another search or create a new student.
               </div>
